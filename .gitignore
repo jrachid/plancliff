@@ -10,3 +10,4 @@ dist/
 # Notes privées de Rachid : copiées vers Drive par rsync, jamais publiées
 CLAUDE.md
 ai/
+*.resultats.json
