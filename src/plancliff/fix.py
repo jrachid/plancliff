@@ -12,11 +12,18 @@ class Method(StrEnum):
     UNPREPARED = "unprepared"
 
 
-HINTS = {
-    Method.SET_LOCAL: "SET LOCAL plan_cache_mode = force_custom_plan;  -- in the same transaction, just before this query",
-    Method.UNPREPARED: "never prepare this query; with psycopg 3: cursor.execute(query, params, prepare=False)",
+SET_LOCAL_HINT = "SET LOCAL plan_cache_mode = force_custom_plan;  -- in the same transaction, just before this query"
+UNPREPARED_HINTS = {
+    "psycopg": "never prepare this query; with psycopg 3: cursor.execute(query, params, prepare=False)",
+    "pgx": "never prepare this query; with pgx: pass pgx.QueryExecModeExec as the first argument, conn.Query(ctx, sql, pgx.QueryExecModeExec, args...)",
+    "asyncpg": "never prepare this query; asyncpg has no per-query switch: run it on a connection opened with statement_cache_size=0",
+    "jdbc": "never prepare this query; with pgjdbc: ((PGStatement) statement).setPrepareThreshold(0) on this statement",
 }
-BROAD_FIX = "ALTER ROLE <app role> SET plan_cache_mode = force_custom_plan  -- every query of the role pays planning, +78% on a 4-table join"
+BROAD_FIX = "ALTER ROLE <app role> SET plan_cache_mode = force_custom_plan  -- every query of the role pays planning, about +75% on a 4-table join"
+
+
+def hint(method: Method, driver: str) -> str:
+    return SET_LOCAL_HINT if method is Method.SET_LOCAL else UNPREPARED_HINTS[driver]
 
 
 @dataclass(frozen=True)
@@ -32,7 +39,7 @@ class Fix:
 
 def _judge(method: Method, replay: Replay, baseline: Verification, settings: Settings) -> Fix:
     works = not settings.is_slowdown(replay.after_ms, baseline.before_ms) and not replay.generic_plans
-    return Fix(method, HINTS[method], len(replay.timings), replay.after_ms, replay.generic_plans, works)
+    return Fix(method, hint(method, settings.driver), len(replay.timings), replay.after_ms, replay.generic_plans, works)
 
 
 def check_fixes(conn: psycopg.Connection, query: str, values: tuple[str, ...], baseline: Verification, settings: Settings) -> tuple[Fix, ...]:
@@ -46,7 +53,7 @@ def check_fixes(conn: psycopg.Connection, query: str, values: tuple[str, ...], b
         try:
             fixes.append(_judge(method, replay(), baseline, settings))
         except Exception as error:
-            fixes.append(Fix(method, HINTS[method], error=(str(error).strip().splitlines() or [type(error).__name__])[0]))
+            fixes.append(Fix(method, hint(method, settings.driver), error=(str(error).strip().splitlines() or [type(error).__name__])[0]))
         finally:
             reset(conn)
     return tuple(fixes)

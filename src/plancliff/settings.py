@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+DRIVERS = ("psycopg", "pgx", "asyncpg", "jdbc")
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -9,6 +11,7 @@ class Settings:
     timeout_s: float = 30.0
     verify: bool = True
     verify_calls: int = 20
+    driver: str = "psycopg"
 
     def is_slowdown(self, slow_ms: float, fast_ms: float) -> bool:
         """is_slowdown applies the cliff rule: at least ratio_threshold times slower and min_gap_ms milliseconds lost."""

@@ -13,7 +13,7 @@ from plancliff.guard import APPLICATION_NAME, busy_message, other_sessions
 from plancliff.queries import read_queries
 from plancliff.report import json_document, text_line, text_summary
 from plancliff.scan import Finding, Verdict, scan_query
-from plancliff.settings import Settings
+from plancliff.settings import DRIVERS, Settings
 from plancliff.stats import StatsRead, StatsUnavailable, hidden_message, read_stat_queries, scan_stat_query
 from plancliff.style import BOLD, DIM, RED, YELLOW, Style, wants_color
 
@@ -33,6 +33,8 @@ def _parser() -> argparse.ArgumentParser:
                       "connection) instead of the scanned one")
     scan.add_argument("--allow-busy", action="store_true", help="scan even when other sessions are connected to the scanned database; "
                       "measured writes and FOR UPDATE reads lock rows while they run")
+    scan.add_argument("--driver", choices=DRIVERS, default=Settings.driver,
+                      help="the application's driver, to write the unprepared fix in its terms (default: %(default)s)")
     scan.add_argument("--top", type=int, default=100, help="number of pg_stat_statements queries to scan, costliest first (default: %(default)s)")
     scan.add_argument("--threshold", type=float, default=Settings.ratio_threshold, help="slowdown ratio that counts as a cliff (default: %(default)s)")
     scan.add_argument("--min-gap-ms", type=float, default=Settings.min_gap_ms, help="smallest absolute slowdown that counts (default: %(default)s ms)")
@@ -61,7 +63,9 @@ def _main(argv: list[str] | None) -> int:
         return _fail(err, "give either a file or --stats-from, not both")
     if args.file is not None and not args.file.is_file():
         return _fail(err, f"no such file: {args.file}")
-    settings = Settings(ratio_threshold=args.threshold, min_gap_ms=args.min_gap_ms, timeout_s=args.timeout, verify=not args.no_verify)
+    settings = Settings(
+        ratio_threshold=args.threshold, min_gap_ms=args.min_gap_ms, timeout_s=args.timeout, verify=not args.no_verify, driver=args.driver
+    )
     if args.format == "json":
         s = Style(False)
     try:
