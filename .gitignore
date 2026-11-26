@@ -1,0 +1,12 @@
+.tmp/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+*.resultats.csv
+
+# Notes privées de Rachid : copiées vers Drive par rsync, jamais publiées
+CLAUDE.md
+ai/
