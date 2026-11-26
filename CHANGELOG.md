@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 — unreleased
+## 0.1.1 — 2026-11-26
 
 - `--driver psycopg|pgx|asyncpg|jdbc` writes the unprepared fix in the application's driver: `pgx.QueryExecModeExec`, `setPrepareThreshold(0)`, `statement_cache_size=0`, or `prepare=False`. The JSON report records the driver.
 - An `INSERT` gets a value absent from each unique column (integer, text, `bytea`, `uuid`) instead of the most common one, so it no longer fails on an existing key. On Temporal's 94 queries, untestable queries drop from 11 to 7.
