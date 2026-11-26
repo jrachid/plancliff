@@ -7,12 +7,13 @@ from pathlib import Path
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 
+from plancliff.guard import APPLICATION_NAME, busy_message, other_sessions
 from plancliff.queries import read_queries
 from plancliff.report import json_document, text_line, text_summary
 from plancliff.scan import Finding, Verdict, scan_query
 from plancliff.settings import Settings
-from plancliff.stats import StatQuery, StatsUnavailable, read_stat_queries, scan_stat_query
-from plancliff.style import BOLD, DIM, RED, Style, wants_color
+from plancliff.stats import StatsRead, StatsUnavailable, hidden_message, read_stat_queries, scan_stat_query
+from plancliff.style import BOLD, DIM, RED, YELLOW, Style, wants_color
 
 EXIT_OK, EXIT_CLIFF, EXIT_USAGE = 0, 1, 2
 
@@ -26,6 +27,8 @@ def _parser() -> argparse.ArgumentParser:
                       "without it, the queries come from pg_stat_statements")
     scan.add_argument("--stats-from", metavar="DSN", help="read pg_stat_statements from this database (e.g. production, through a read-only "
                       "connection) instead of the scanned one")
+    scan.add_argument("--allow-busy", action="store_true", help="scan even when other sessions are connected to the scanned database; "
+                      "measured writes and FOR UPDATE reads lock rows while they run")
     scan.add_argument("--top", type=int, default=100, help="number of pg_stat_statements queries to scan, costliest first (default: %(default)s)")
     scan.add_argument("--threshold", type=float, default=Settings.ratio_threshold, help="slowdown ratio that counts as a cliff (default: %(default)s)")
     scan.add_argument("--min-gap-ms", type=float, default=Settings.min_gap_ms, help="smallest absolute slowdown that counts (default: %(default)s ms)")
@@ -42,8 +45,8 @@ def _fail(err: Style, message: str) -> int:
     return EXIT_USAGE
 
 
-def _stat_queries(dsn: str, top: int) -> list[StatQuery]:
-    with psycopg.connect(dsn, options="-c default_transaction_read_only=on") as conn:
+def _stat_queries(dsn: str, top: int) -> StatsRead:
+    with psycopg.connect(dsn, options="-c default_transaction_read_only=on", application_name=APPLICATION_NAME) as conn:
         return read_stat_queries(conn, top)
 
 
@@ -63,16 +66,25 @@ def main(argv: list[str] | None = None) -> int:
             jobs = [lambda conn, q=query: scan_query(conn, q.name, q.sql, settings) for query in read_queries(args.file)]
         else:
             stats_dsn = args.stats_from or args.dsn
-            stat_queries = _stat_queries(stats_dsn, args.top)
-            source = {"kind": "pg_stat_statements", "database": conninfo_to_dict(stats_dsn).get("dbname"), "top": args.top}
-            jobs = [lambda conn, q=stat: scan_stat_query(conn, q, settings) for stat in stat_queries]
+            stats = _stat_queries(stats_dsn, args.top)
+            if not stats.queries and stats.hidden:
+                return _fail(err, hidden_message(stats.hidden))
+            source = {"kind": "pg_stat_statements", "database": conninfo_to_dict(stats_dsn).get("dbname"), "top": args.top, "hidden": stats.hidden}
+            jobs = [lambda conn, q=stat: scan_stat_query(conn, q, settings) for stat in stats.queries]
             if args.format == "text":
                 print(s(f"{len(jobs)} queries from pg_stat_statements of {source['database']}, costliest first", DIM), flush=True)
-        conn = psycopg.connect(args.dsn)
+                if stats.hidden:
+                    print(s(hidden_message(stats.hidden), YELLOW), flush=True)
+        conn = psycopg.connect(args.dsn, application_name=APPLICATION_NAME)
     except StatsUnavailable as error:
         return _fail(err, str(error))
     except psycopg.Error as error:
         return _fail(err, f"cannot connect: {str(error).strip()}")
+    if not args.allow_busy:
+        sessions = other_sessions(conn)
+        if sessions:
+            conn.close()
+            return _fail(err, busy_message(sessions))
     started, findings = time.perf_counter(), []
     try:
         for scan in jobs:

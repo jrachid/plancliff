@@ -16,6 +16,10 @@ class _Binder(Visitor):
     def __init__(self) -> None:
         self.tables: dict[str, tuple[str | None, str]] = {}
         self.bindings: dict[int, list[str]] = {}
+        self.ctes: set[str] = set()
+
+    def visit_CommonTableExpr(self, ancestors, node):
+        self.ctes.add(node.ctename)
 
     def visit_RangeVar(self, ancestors, node):
         alias = node.alias.aliasname if node.alias else node.relname
@@ -54,6 +58,7 @@ def parameter_columns(query: str) -> dict[int, Column]:
     """parameter_columns maps each `$n` to the column it is compared with; a parameter whose table is ambiguous is left out."""
     binder = _Binder()
     binder(parse_sql(query))
+    binder.tables = {alias: table for alias, table in binder.tables.items() if not (table[0] is None and table[1] in binder.ctes)}
     only_table = next(iter(binder.tables.values())) if len(set(binder.tables.values())) == 1 else None
     columns = {}
     for number, path in binder.bindings.items():

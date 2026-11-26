@@ -26,6 +26,14 @@ select queryid, calls, total_exec_time, query
 """
 
 
+HIDDEN = """
+select count(*)
+  from pg_stat_statements
+ where dbid = (select oid from pg_database where datname = current_database())
+   and query = '<insufficient privilege>'
+"""
+
+
 class StatsUnavailable(Exception):
     pass
 
@@ -43,17 +51,24 @@ class StatQuery:
         return f"{text[:NAME_WIDTH] + '…' if len(text) > NAME_WIDTH else text}  [{self.calls} calls, queryid {self.queryid}]"
 
 
-def read_stat_queries(conn: psycopg.Connection, top: int) -> list[StatQuery]:
-    """read_stat_queries returns the application's parameterised queries, costliest first; raises StatsUnavailable with the fix to apply."""
+@dataclass(frozen=True)
+class StatsRead:
+    queries: list[StatQuery]
+    hidden: int
+
+
+def read_stat_queries(conn: psycopg.Connection, top: int) -> StatsRead:
+    """read_stat_queries returns the application's queries, costliest first, and how many the role may not read; raises StatsUnavailable."""
     if not conn.execute("select 1 from pg_extension where extname = 'pg_stat_statements'").fetchone():
         raise StatsUnavailable("pg_stat_statements is not installed in this database: run CREATE EXTENSION pg_stat_statements;")
     try:
         rows = conn.execute(READ, (top,)).fetchall()
+        hidden = conn.execute(HIDDEN).fetchone()[0]
     except psycopg.Error as error:
         raise StatsUnavailable(f"pg_stat_statements cannot be read: {str(error).strip().splitlines()[0]}") from error
     finally:
         conn.rollback()
-    return [StatQuery(*row) for row in rows if not row[3].startswith("<insufficient privilege>")]
+    return StatsRead([StatQuery(*row) for row in rows], hidden)
 
 
 class _Params(Visitor):
@@ -90,6 +105,13 @@ def constant_form(conn: psycopg.Connection, query: str) -> tuple[str, str] | Non
         text = text[:location] + replacement + text[location + len(token):]
     names = ", ".join(f"${n}" for n in inlined)
     return text, f"{names} also tried as the constant {DEFAULT_INTEGER}: pg_stat_statements does not tell constants from parameters"
+
+
+def hidden_message(hidden: int) -> str:
+    return (
+        f"{hidden} statements of other roles are hidden from this role, so it cannot tell which are application queries: "
+        "GRANT pg_read_all_stats TO <this role>; lets it read them"
+    )
 
 
 def scan_stat_query(conn: psycopg.Connection, stat: StatQuery, settings: Settings) -> Finding:

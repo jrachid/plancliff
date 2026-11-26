@@ -42,3 +42,12 @@ def test_a_limit_parameter_has_no_column():
 
 def test_an_unqualified_column_in_a_join_is_left_out_rather_than_guessed():
     assert parameter_columns("select 1 from a join b on a.id = b.a_id where label = $1") == {}
+
+
+def test_a_cte_name_is_not_a_table_so_its_columns_stay_resolvable():
+    query = "with q as (select id from jobs where status = $1 order by created_at limit $2) delete from jobs where id in (select id from q)"
+    assert parameter_columns(query) == {1: Column("jobs", "status")}
+
+
+def test_a_column_qualified_by_a_cte_name_is_left_out():
+    assert parameter_columns("with q as (select id, status from jobs) select id from q where q.status = $1") == {}

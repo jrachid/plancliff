@@ -19,6 +19,8 @@ plancliff scan postgresql://user@host/db_copy queries.sql
 
 Every query runs inside a transaction that is rolled back, writes included. `--stats-from` connects with `default_transaction_read_only` and only reads `pg_stat_statements`: a restored copy has no statistics of its own.
 
+plancliff refuses to scan a database other sessions are connected to: measuring a write or a `FOR UPDATE` read locks rows while it runs, even rolled back, and would make a live application wait. `--allow-busy` overrides this for a shared staging database you accept to slow down. plancliff's own connections are named `plancliff` and do not count.
+
 ```
  CLIFF      650.8×  generic     89.80 ms, custom     0.14 ms  queue
          triggered by the rare values: pending
@@ -37,6 +39,8 @@ Prefer the targeted fixes above to the broad one: ALTER ROLE <app role> SET plan
 plancliff keeps the application's parameterised queries (`select`, `insert`, `update`, `delete`, `with`, `merge`), costliest first (`--top`, 100 by default), and skips utility statements and queries on system objects (`pg_*`, `information_schema`). The extension must be loaded (`shared_preload_libraries`) and installed (`CREATE EXTENSION pg_stat_statements`).
 
 pg_stat_statements replaces constants with `$n`: a `limit 10` written in the code is stored as `limit $2`, and a parameterised limit hides the cliff from the generic plan. So an integer parameter that matches no column is also tried as a constant, and the worse verdict is kept, with a note. When your code really passes that value as a parameter, this can report a cliff that only exists in the constant form.
+
+Without the `pg_read_all_stats` role, the statements of other roles are stored as `<insufficient privilege>`: plancliff counts them and says so (`GRANT pg_read_all_stats TO <role>;`), rather than silently scanning fewer queries; when it can read none at all, it exits with 2 instead of reporting an empty, green scan.
 
 The replays plancliff runs are themselves counted by pg_stat_statements on the scanned database.
 
