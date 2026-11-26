@@ -6,6 +6,12 @@ from psycopg.conninfo import make_conninfo
 
 ADMIN_DSN = os.environ.get("PLANCLIFF_TEST_DSN", "postgresql://postgres:p@localhost:55432/postgres")
 TEST_DB = "plancliff_test"
+REQUIRE_DB = bool(os.environ.get("PLANCLIFF_REQUIRE_DB"))
+
+
+def _unavailable(reason: str) -> None:
+    """_unavailable skips the database tests locally, and fails them in CI where PLANCLIFF_REQUIRE_DB is set."""
+    (pytest.fail if REQUIRE_DB else pytest.skip)(reason)
 JOBS = 300_000
 PENDING = 300
 EVENTS = 300_000
@@ -16,7 +22,7 @@ def dsn() -> str:
     try:
         admin = psycopg.connect(ADMIN_DSN, autocommit=True, connect_timeout=3)
     except psycopg.OperationalError as error:
-        pytest.skip(f"no Postgres for the database tests (set PLANCLIFF_TEST_DSN): {error}")
+        _unavailable(f"no Postgres for the database tests (set PLANCLIFF_TEST_DSN): {error}")
     with admin:
         admin.execute(f"drop database if exists {TEST_DB} with (force)")
         admin.execute(f"create database {TEST_DB}")
@@ -80,10 +86,10 @@ def stats_dsns():
     try:
         admin = psycopg.connect(STATS_ADMIN_DSN, autocommit=True, connect_timeout=3)
     except psycopg.OperationalError as error:
-        pytest.skip(f"no Postgres with pg_stat_statements for these tests (set PLANCLIFF_TEST_STATS_DSN): {error}")
+        _unavailable(f"no Postgres with pg_stat_statements for these tests (set PLANCLIFF_TEST_STATS_DSN): {error}")
     with admin:
         if "pg_stat_statements" not in admin.execute("show shared_preload_libraries").fetchone()[0]:
-            pytest.skip("pg_stat_statements is not in shared_preload_libraries of PLANCLIFF_TEST_STATS_DSN")
+            _unavailable("pg_stat_statements is not in shared_preload_libraries of PLANCLIFF_TEST_STATS_DSN")
         for name in (PRODUCTION, COPY):
             admin.execute(f"drop database if exists {name} with (force)")
             admin.execute(f"create database {name}")
