@@ -1,6 +1,6 @@
 [project]
 name = "plancliff"
-version = "0.1.0"
+version = "0.1.1"
 description = "Find the PostgreSQL queries that become hundreds of times slower once Postgres switches a prepared statement to its generic plan, and prove the fix."
 readme = "README.md"
 keywords = ["postgresql", "postgres", "performance", "prepared-statements", "generic-plan", "query-plan", "psycopg", "pg_stat_statements"]

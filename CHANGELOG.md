@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 — unreleased
+
+- `--driver psycopg|pgx|asyncpg|jdbc` writes the unprepared fix in the application's driver: `pgx.QueryExecModeExec`, `setPrepareThreshold(0)`, `statement_cache_size=0`, or `prepare=False`. The JSON report records the driver.
+- An `INSERT` gets a value absent from each unique column (integer, text, `bytea`, `uuid`) instead of the most common one, so it no longer fails on an existing key. On Temporal's 94 queries, untestable queries drop from 11 to 7.
+- Every measured or replayed execution is undone by a savepoint, so repeated inserts do not collide and repeated deletes see the same rows.
+- Fixed: a connection on which psycopg had prepared statements of its own lost plancliff's probe on the first savepoint rollback; scans now turn psycopg's automatic preparation off and restore it afterwards.
+
 ## 0.1.0 — 2026-11-26
 
 First release.

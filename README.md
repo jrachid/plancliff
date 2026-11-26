@@ -23,7 +23,7 @@ Two public examples, both reproduced on their real schema in [`labo/`](labo/READ
 - [OpenFGA #3444](https://github.com/openfga/openfga/issues/3444): the write pre-check, `SELECT … FOR UPDATE`, reported going from 13 ms to 43 s. Reproduced through psycopg 3 with default settings: 0.6 to 1 ms for calls 1 to 10, 242 ms at call 11.
 - [Temporal #12791](https://github.com/temporalio/temporal/issues/12791): the task cleanup `DELETE`. Reproduced the same way: 0.8 to 1.3 ms for calls 1 to 10, then 2.1 to 2.3 s per call.
 
-The usual cure, `plan_cache_mode = force_custom_plan` for the whole database, makes every query plan on every call: +78% on a 4-table join in the lab. The point is to know *which* queries need it.
+The usual cure, `plan_cache_mode = force_custom_plan` for the whole database, makes every query plan on every call: about +75% on a 4-table join in the lab. The point is to know *which* queries need it.
 
 ## What plancliff does
 
@@ -79,7 +79,16 @@ with conn.transaction():
 cur.execute("select id from jobs where status = %s order by created_at limit 10", ("pending",), prepare=False)
 ```
 
-Both make Postgres plan this query on each call. That costs a little: on Temporal's v2 task cleanup, 2.56 ms per call before the switch, 3.08 ms with `SET LOCAL`, against 68 ms without a fix.
+Not preparing a query is written differently in each driver; `--driver` makes the report use yours. plancliff proves this fix by sending the query as an unnamed statement, which is what all of them do:
+
+| `--driver` | Never prepare this query | Scope |
+| --- | --- | --- |
+| `psycopg` (default) | `cursor.execute(query, params, prepare=False)` | one query |
+| `pgx` | `conn.Query(ctx, sql, pgx.QueryExecModeExec, args...)` | one query |
+| `jdbc` | `((PGStatement) statement).setPrepareThreshold(0)` | one statement |
+| `asyncpg` | no per-query switch: a connection opened with `statement_cache_size=0` | the whole connection |
+
+Both fixes make Postgres plan this query on each call. For one query the cost is lost in the noise: on Temporal's v2 task cleanup, 2.53 ms per call before the switch, 2.49 ms with `SET LOCAL`, against 68 ms without a fix.
 
 ## Reading pg_stat_statements
 
@@ -107,6 +116,7 @@ Without the `pg_read_all_stats` role, the statements of other roles are stored a
 | `--threshold`, `--min-gap-ms` | the cliff rule, 10× and 5 ms by default |
 | `--timeout` | statement timeout per execution, in seconds (30) |
 | `--allow-busy` | scan even when other sessions are connected |
+| `--driver psycopg\|pgx\|asyncpg\|jdbc` | the application's driver, so the unprepared fix is written in its terms |
 | `-v` | also list the queries that are fine |
 | `--color auto\|always\|never` | coloured in a terminal, plain when piped; `NO_COLOR=1` and `FORCE_COLOR=1` are honoured |
 | `--version` | print the version |
@@ -115,7 +125,7 @@ Without the `pg_read_all_stats` role, the statements of other roles are stored a
 
 - **Two scenarios per column**, its most and its least common value, taken independently: a trap that needs a specific combination of values can be missed.
 - **Realistic data only.** On synthetic data with 101 task queues instead of 2,000, Temporal's ticket query does not fall: plancliff reports the data it is given.
-- **Untestable queries** come out as `error`: inserts that hit an existing key with the value tried, empty tables, text parameters that match no column. On Temporal's 94 queries, 11 are untestable.
+- **Untestable queries** come out as `error`: empty tables, text or binary parameters that match no column, queries completed at runtime. On Temporal's 94 queries, 7 are untestable. An `INSERT` gets a value absent from each unique column, so it does not hit an existing key.
 - **The verification replays one value 20 times.** An application varies its values, which can make Postgres switch earlier, later, or never.
 - **Planning time is not measured**, so a custom plan that is slow because it replans on each call (the reverse problem) is not reported.
 - **Postgres 18 folds a list of constants** into `IN ($1 /*, ... */)` in `pg_stat_statements`; plancliff replays it with a single value.
