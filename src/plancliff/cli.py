@@ -5,12 +5,14 @@ from collections import Counter
 from pathlib import Path
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 
 from plancliff.queries import read_queries
 from plancliff.report import json_document, text_line, text_summary
-from plancliff.scan import Verdict, scan_query
+from plancliff.scan import Finding, Verdict, scan_query
 from plancliff.settings import Settings
-from plancliff.style import BOLD, RED, Style, wants_color
+from plancliff.stats import StatQuery, StatsUnavailable, read_stat_queries, scan_stat_query
+from plancliff.style import BOLD, DIM, RED, Style, wants_color
 
 EXIT_OK, EXIT_CLIFF, EXIT_USAGE = 0, 1, 2
 
@@ -18,9 +20,13 @@ EXIT_OK, EXIT_CLIFF, EXIT_USAGE = 0, 1, 2
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="plancliff", description="Find the queries that fall off a cliff when Postgres switches to a generic plan.")
     commands = parser.add_subparsers(dest="command", required=True)
-    scan = commands.add_parser("scan", help="measure generic against custom plans for each query of a file")
+    scan = commands.add_parser("scan", help="measure generic against custom plans for each query of a file or of pg_stat_statements")
     scan.add_argument("dsn", help="connection string of a database copy with realistic data, e.g. postgresql://user@host/db")
-    scan.add_argument("file", type=Path, help="queries with $1, $2… placeholders, one per block separated by a blank line")
+    scan.add_argument("file", type=Path, nargs="?", help="queries with $1, $2… placeholders, one per block separated by a blank line; "
+                      "without it, the queries come from pg_stat_statements")
+    scan.add_argument("--stats-from", metavar="DSN", help="read pg_stat_statements from this database (e.g. production, through a read-only "
+                      "connection) instead of the scanned one")
+    scan.add_argument("--top", type=int, default=100, help="number of pg_stat_statements queries to scan, costliest first (default: %(default)s)")
     scan.add_argument("--threshold", type=float, default=Settings.ratio_threshold, help="slowdown ratio that counts as a cliff (default: %(default)s)")
     scan.add_argument("--min-gap-ms", type=float, default=Settings.min_gap_ms, help="smallest absolute slowdown that counts (default: %(default)s ms)")
     scan.add_argument("--timeout", type=float, default=Settings.timeout_s, help="statement timeout per execution, in seconds (default: %(default)s)")
@@ -31,24 +37,46 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _fail(err: Style, message: str) -> int:
+    print(f"{err('plancliff:', BOLD, RED)} {message}", file=sys.stderr)
+    return EXIT_USAGE
+
+
+def _stat_queries(dsn: str, top: int) -> list[StatQuery]:
+    with psycopg.connect(dsn, options="-c default_transaction_read_only=on") as conn:
+        return read_stat_queries(conn, top)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     s, err = Style(wants_color(args.color, sys.stdout)), Style(wants_color(args.color, sys.stderr))
-    if not args.file.is_file():
-        print(f"{err('plancliff:', BOLD, RED)} no such file: {args.file}", file=sys.stderr)
-        return EXIT_USAGE
+    if args.file is not None and args.stats_from:
+        return _fail(err, "give either a file or --stats-from, not both")
+    if args.file is not None and not args.file.is_file():
+        return _fail(err, f"no such file: {args.file}")
     settings = Settings(ratio_threshold=args.threshold, min_gap_ms=args.min_gap_ms, timeout_s=args.timeout, verify=not args.no_verify)
     if args.format == "json":
         s = Style(False)
     try:
+        if args.file is not None:
+            source = {"kind": "file", "path": str(args.file)}
+            jobs = [lambda conn, q=query: scan_query(conn, q.name, q.sql, settings) for query in read_queries(args.file)]
+        else:
+            stats_dsn = args.stats_from or args.dsn
+            stat_queries = _stat_queries(stats_dsn, args.top)
+            source = {"kind": "pg_stat_statements", "database": conninfo_to_dict(stats_dsn).get("dbname"), "top": args.top}
+            jobs = [lambda conn, q=stat: scan_stat_query(conn, q, settings) for stat in stat_queries]
+            if args.format == "text":
+                print(s(f"{len(jobs)} queries from pg_stat_statements of {source['database']}, costliest first", DIM), flush=True)
         conn = psycopg.connect(args.dsn)
+    except StatsUnavailable as error:
+        return _fail(err, str(error))
     except psycopg.Error as error:
-        print(f"{err('plancliff:', BOLD, RED)} cannot connect: {str(error).strip()}", file=sys.stderr)
-        return EXIT_USAGE
+        return _fail(err, f"cannot connect: {str(error).strip()}")
     started, findings = time.perf_counter(), []
     try:
-        for query in read_queries(args.file):
-            finding = scan_query(conn, query.name, query.sql, settings)
+        for scan in jobs:
+            finding: Finding = scan(conn)
             findings.append(finding)
             if args.format == "text" and (args.verbose or finding.verdict is not Verdict.OK):
                 print(text_line(finding, s), flush=True)
@@ -57,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         conn.close()
     seconds = time.perf_counter() - started
     if args.format == "json":
-        print(json_document(findings, seconds, settings))
+        print(json_document(findings, seconds, settings, source))
     else:
         print(text_summary(Counter(finding.verdict for finding in findings), seconds, s))
     return EXIT_CLIFF if any(finding.verdict is Verdict.CLIFF for finding in findings) else EXIT_OK

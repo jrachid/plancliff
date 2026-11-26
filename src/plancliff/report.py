@@ -61,6 +61,8 @@ def text_line(finding: Finding, s: Style) -> str:
         values = finding.values
         shown = ", ".join(values[:SHOWN_VALUES]) + (f", … ({len(values)} values)" if len(values) > SHOWN_VALUES else "")
         lines.append(f"{INDENT}{s(f'triggered by the {finding.scenario} values:', DIM)} {s(shown, CYAN)}")
+        if finding.note:
+            lines.append(f"{INDENT}{s('note:', DIM)} {s(finding.note, DIM)}")
         verification = _verification_line(finding, s)
         if verification:
             lines.append(f"{INDENT}{verification}")
@@ -90,12 +92,13 @@ def _rounded(value):
     return value
 
 
-def json_document(findings: Sequence[Finding], seconds: float, settings: Settings) -> str:
+def json_document(findings: Sequence[Finding], seconds: float, settings: Settings, source: dict | None = None) -> str:
     """json_document renders a whole scan; FORMAT_VERSION changes whenever a field is renamed or removed."""
     counts = Counter(finding.verdict for finding in findings)
     document = {
         "format": FORMAT_VERSION,
         "plancliff": version("plancliff"),
+        "source": source or {},
         "settings": dataclasses.asdict(settings),
         "queries": [dataclasses.asdict(finding) for finding in findings],
         "summary": {"queries": len(findings), **{verdict.value: counts[verdict] for verdict in Verdict}, "seconds": seconds},

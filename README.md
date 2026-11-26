@@ -7,10 +7,17 @@ Point plancliff at a copy of your database: it tells you which queries will get 
 ## Usage
 
 ```bash
+# the queries your application actually runs, read from pg_stat_statements of production, measured on a copy
+plancliff scan postgresql://user@host/db_copy --stats-from postgresql://readonly@prod/db
+
+# the same, when the scanned database has its own pg_stat_statements (a staging database under real traffic)
+plancliff scan postgresql://user@host/db
+
+# or a file: one query per block, blocks separated by a blank line, with $1, $2… placeholders
 plancliff scan postgresql://user@host/db_copy queries.sql
 ```
 
-`queries.sql` holds one query per block, blocks separated by a blank line, with `$1`, `$2`… placeholders; an optional `-- name` line names a block. Every query runs inside a transaction that is rolled back, writes included.
+Every query runs inside a transaction that is rolled back, writes included. `--stats-from` connects with `default_transaction_read_only` and only reads `pg_stat_statements`: a restored copy has no statistics of its own.
 
 ```
  CLIFF      650.8×  generic     89.80 ms, custom     0.14 ms  queue
@@ -24,6 +31,14 @@ plancliff scan postgresql://user@host/db_copy queries.sql
 3 queries in 2.0 s: 1 cliff, 0 latent, 2 ok, 0 error
 Prefer the targeted fixes above to the broad one: ALTER ROLE <app role> SET plan_cache_mode = force_custom_plan  -- every query of the role pays planning, +78% on a 4-table join
 ```
+
+## Reading pg_stat_statements
+
+plancliff keeps the application's parameterised queries (`select`, `insert`, `update`, `delete`, `with`, `merge`), costliest first (`--top`, 100 by default), and skips utility statements and queries on system objects (`pg_*`, `information_schema`). The extension must be loaded (`shared_preload_libraries`) and installed (`CREATE EXTENSION pg_stat_statements`).
+
+pg_stat_statements replaces constants with `$n`: a `limit 10` written in the code is stored as `limit $2`, and a parameterised limit hides the cliff from the generic plan. So an integer parameter that matches no column is also tried as a constant, and the worse verdict is kept, with a note. When your code really passes that value as a parameter, this can report a cliff that only exists in the constant form.
+
+The replays plancliff runs are themselves counted by pg_stat_statements on the scanned database.
 
 ## How it decides
 

@@ -38,6 +38,7 @@ class Finding:
     verification: Verification | None = None
     verification_error: str = ""
     fixes: tuple[Fix, ...] = ()
+    note: str = ""
     seconds: float = field(default=0.0, compare=False)
 
 
