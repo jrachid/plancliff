@@ -5,8 +5,9 @@ from pglast import parse_sql
 from pglast.visitors import Visitor
 from psycopg import sql
 
+from plancliff.candidates import INTEGER_TYPES
 from plancliff.parameters import parameter_columns
-from plancliff.scan import DEFAULT_INTEGER, INTEGER_TYPES, Finding, Verdict, scan_query
+from plancliff.scan import DEFAULT_INTEGER, Finding, Verdict, scan_query
 from plancliff.settings import Settings
 from plancliff.verify import reset
 

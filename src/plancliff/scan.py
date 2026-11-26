@@ -6,16 +6,15 @@ from enum import StrEnum
 import psycopg
 from psycopg import sql
 
-from plancliff.candidates import candidates
+from plancliff.candidates import INTEGER_TYPES, candidates, fresh_value, unique_columns
 from plancliff.fix import Fix, check_fixes
-from plancliff.parameters import parameter_columns
+from plancliff.parameters import is_insert, parameter_columns
 from plancliff.settings import Settings
-from plancliff.verify import Verification, reset, verify
+from plancliff.verify import SAVEPOINT, Verification, reset, verify
 
 DEFAULT_INTEGER = 100
 DEFAULT_SETTINGS = Settings()
 STATEMENT = "plancliff_probe"
-INTEGER_TYPES = {"smallint", "integer", "bigint"}
 
 
 class Verdict(StrEnum):
@@ -54,18 +53,26 @@ def _execution_ms(conn: psycopg.Connection, mode: str, values: list, runs: int) 
     )
     timings = []
     for _ in range(1 + runs):
+        conn.execute(f"savepoint {SAVEPOINT}")
         plan = conn.execute(explain).fetchone()[0]
+        conn.execute(f"rollback to savepoint {SAVEPOINT}")
         plan = json.loads(plan) if isinstance(plan, str) else plan
         timings.append(float(plan[0]["Execution Time"]))
     return min(timings[1:])
 
 
 def _values_per_scenario(conn: psycopg.Connection, query: str) -> dict[str, list]:
-    tried = {number: candidates(conn, column) for number, column in parameter_columns(query).items()}
+    columns = parameter_columns(query)
+    tried = {number: candidates(conn, column) for number, column in columns.items()}
     types = conn.execute("select parameter_types::text[] from pg_prepared_statements where name = %s", (STATEMENT,)).fetchone()[0]
+    keys = {number: column for number, column in columns.items() if column.name in unique_columns(conn, column)} if is_insert(query) else {}
     frequent, rare = [], []
     for number, type_name in enumerate(types, start=1):
-        if number in tried:
+        fresh = fresh_value(conn, keys[number], type_name) if number in keys else None
+        if fresh is not None:
+            frequent.append(fresh)
+            rare.append(fresh)
+        elif number in tried:
             frequent.append(tried[number].frequent)
             rare.append(tried[number].rare)
         elif type_name in INTEGER_TYPES:
@@ -115,12 +122,17 @@ def scan_query(conn: psycopg.Connection, name: str, query: str, settings: Settin
     if conn.autocommit:
         raise ValueError("scan_query needs a connection with autocommit off, or measured writes would be committed")
     started = time.perf_counter()
+    # psycopg answers any ROLLBACK, savepoints included, with DEALLOCATE ALL once it has prepared a statement itself.
+    threshold, conn.prepare_threshold = conn.prepare_threshold, None
     try:
-        finding = _measure(conn, name, query, settings)
-    except Exception as error:
-        finding = Finding(name=name, sql=query, verdict=Verdict.ERROR, error=_first_line(error))
+        try:
+            finding = _measure(conn, name, query, settings)
+        except Exception as error:
+            finding = Finding(name=name, sql=query, verdict=Verdict.ERROR, error=_first_line(error))
+        finally:
+            reset(conn)
+        if finding.verdict is Verdict.CLIFF and settings.verify:
+            finding = _verify(conn, finding, settings)
     finally:
-        reset(conn)
-    if finding.verdict is Verdict.CLIFF and settings.verify:
-        finding = _verify(conn, finding, settings)
+        conn.prepare_threshold = threshold
     return replace(finding, seconds=time.perf_counter() - started)

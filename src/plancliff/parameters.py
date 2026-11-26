@@ -68,3 +68,7 @@ def parameter_columns(query: str) -> dict[int, Column]:
         if table is not None:
             columns[number] = Column(schema=table[0], table=table[1], name=path[-1])
     return columns
+
+
+def is_insert(query: str) -> bool:
+    return any(isinstance(raw.stmt, ast.InsertStmt) for raw in parse_sql(query))

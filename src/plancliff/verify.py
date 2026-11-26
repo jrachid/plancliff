@@ -9,6 +9,7 @@ from psycopg import pq, sql
 from plancliff.settings import Settings
 
 STATEMENT = "plancliff_verify"
+SAVEPOINT = "plancliff_call"
 BEFORE = slice(1, 5)
 AFTER = slice(6, None)
 
@@ -51,12 +52,20 @@ def _plan_counts(conn: psycopg.Connection) -> tuple[int, int]:
     return conn.execute("select generic_plans, custom_plans from pg_prepared_statements where name = %s", (STATEMENT,)).fetchone()
 
 
-def _timed(calls: int, run: Callable[[], None], after_each: Callable[[], bool] = lambda: False) -> tuple[list[float], int | None]:
+def isolated(conn: psycopg.Connection, run: Callable[[], None]) -> float:
+    """isolated times one execution and undoes its writes, so that every execution sees the same rows."""
+    conn.execute(f"savepoint {SAVEPOINT}")
+    started = time.perf_counter()
+    run()
+    elapsed = (time.perf_counter() - started) * 1000
+    conn.execute(f"rollback to savepoint {SAVEPOINT}")
+    return elapsed
+
+
+def _timed(conn: psycopg.Connection, calls: int, run: Callable[[], None], after_each: Callable[[], bool] = lambda: False) -> tuple[list[float], int | None]:
     timings, first_hit = [], None
     for number in range(1, calls + 1):
-        started = time.perf_counter()
-        run()
-        timings.append((time.perf_counter() - started) * 1000)
+        timings.append(isolated(conn, run))
         if first_hit is None and after_each():
             first_hit = number
     return timings, first_hit
@@ -75,7 +84,7 @@ def replay_prepared(conn: psycopg.Connection, query: str, values: Sequence[str],
     conn.execute("deallocate all")
     conn.execute(sql.SQL("prepare {} as {}").format(sql.Identifier(STATEMENT), sql.SQL(query)))
     call = sql.SQL("execute {}({})").format(sql.Identifier(STATEMENT), sql.SQL(", ").join(map(sql.Literal, values)))
-    timings, switched_at = _timed(settings.verify_calls, lambda: conn.execute(call), lambda: _plan_counts(conn)[0] > 0)
+    timings, switched_at = _timed(conn, settings.verify_calls, lambda: conn.execute(call), lambda: _plan_counts(conn)[0] > 0)
     generic, custom = _plan_counts(conn)
     return Replay(tuple(timings), generic, custom, switched_at)
 
@@ -90,7 +99,7 @@ def replay_unprepared(conn: psycopg.Connection, query: str, values: Sequence[str
         if result.status not in (pq.ExecStatus.TUPLES_OK, pq.ExecStatus.COMMAND_OK):
             raise psycopg.DatabaseError(str(result.get_error_message()).removeprefix("ERROR:").strip())
 
-    timings, _ = _timed(settings.verify_calls, run)
+    timings, _ = _timed(conn, settings.verify_calls, run)
     return Replay(tuple(timings), None, None, None)
 
 
