@@ -28,7 +28,9 @@ def test_a_measured_delete_leaves_the_table_untouched(conn):
 
 
 def test_an_integer_parameter_without_column_gets_a_default_value(conn):
-    assert scan_query(conn, "limit", "select id from jobs where status = $1 order by created_at limit $2").verdict is Verdict.CLIFF
+    finding = scan_query(conn, "limit", "select id from jobs where status = $1 order by created_at limit $2")
+    assert finding.verdict is not Verdict.ERROR, finding
+    assert finding.values == ("pending", "100")
 
 
 def test_a_text_parameter_without_column_is_an_error_asking_for_a_value(conn):
@@ -60,7 +62,7 @@ def test_the_command_exits_with_1_when_a_cliff_is_found(dsn, tmp_path, capsys):
     assert main(["scan", dsn, str(queries)]) == EXIT_CLIFF
     output = capsys.readouterr().out
     assert "CLIFF" in output and "queue" in output and "pending" in output
-    assert "2 queries" in output and "1 cliff, 1 ok, 0 error" in output
+    assert "2 queries" in output and "1 cliff, 0 latent, 1 ok, 0 error" in output
 
 
 def test_the_command_exits_with_0_when_every_query_is_fine(dsn, tmp_path):
@@ -77,6 +79,6 @@ def test_a_missing_file_or_an_unreachable_database_is_a_usage_error(dsn, tmp_pat
 
 
 def _settings(**overrides):
-    from plancliff.scan import Settings
+    from plancliff.settings import Settings
 
     return Settings(**overrides)

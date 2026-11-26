@@ -3,8 +3,7 @@ from typing import TextIO
 
 RESET = "\033[0m"
 BOLD, DIM = "1", "2"
-RED, GREEN, YELLOW, CYAN = "31", "32", "33", "36"
-CLIFF_BADGE, OK_BADGE, ERROR_BADGE = "1;97;41", "1;32", "1;30;43"
+RED, GREEN, YELLOW, MAGENTA, CYAN = "31", "32", "33", "35", "36"
 
 
 def wants_color(mode: str, stream: TextIO) -> bool:

@@ -8,10 +8,9 @@ from psycopg import sql
 
 from plancliff.candidates import candidates
 from plancliff.parameters import parameter_columns
+from plancliff.settings import Settings
+from plancliff.verify import Verification, verify
 
-RATIO_THRESHOLD = 10.0
-MIN_GAP_MS = 5.0
-RUNS = 3
 DEFAULT_INTEGER = 100
 STATEMENT = "plancliff_probe"
 INTEGER_TYPES = {"smallint", "integer", "bigint"}
@@ -19,16 +18,9 @@ INTEGER_TYPES = {"smallint", "integer", "bigint"}
 
 class Verdict(StrEnum):
     CLIFF = "cliff"
+    LATENT = "latent"
     OK = "ok"
     ERROR = "error"
-
-
-@dataclass(frozen=True)
-class Settings:
-    ratio_threshold: float = RATIO_THRESHOLD
-    min_gap_ms: float = MIN_GAP_MS
-    runs: int = RUNS
-    timeout_s: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -42,6 +34,8 @@ class Finding:
     custom_ms: float = 0.0
     values: tuple[str, ...] = ()
     error: str = ""
+    verification: Verification | None = None
+    verification_error: str = ""
     seconds: float = field(default=0.0, compare=False)
 
 
@@ -92,21 +86,40 @@ def _measure(conn: psycopg.Connection, name: str, query: str, settings: Settings
                 name=name, sql=query, verdict=Verdict.OK, ratio=ratio, scenario=scenario,
                 generic_ms=generic, custom_ms=custom, values=tuple(str(v) for v in values),
             )
-    is_cliff = worst.ratio >= settings.ratio_threshold and worst.generic_ms - worst.custom_ms >= settings.min_gap_ms
-    return replace(worst, verdict=Verdict.CLIFF if is_cliff else Verdict.OK)
+    return replace(worst, verdict=Verdict.CLIFF if settings.is_slowdown(worst.generic_ms, worst.custom_ms) else Verdict.OK)
+
+
+def _reset(conn: psycopg.Connection) -> None:
+    conn.rollback()
+    conn.execute("deallocate all")
+    conn.rollback()
+
+
+def _first_line(error: Exception) -> str:
+    return (str(error).strip().splitlines() or [type(error).__name__])[0]
+
+
+def _verify(conn: psycopg.Connection, finding: Finding, settings: Settings) -> Finding:
+    try:
+        verification = verify(conn, finding.sql, finding.values, settings)
+    except Exception as error:
+        return replace(finding, verification_error=_first_line(error))
+    finally:
+        _reset(conn)
+    return replace(finding, verification=verification, verdict=Verdict.CLIFF if verification.confirmed else Verdict.LATENT)
 
 
 def scan_query(conn: psycopg.Connection, name: str, query: str, settings: Settings = Settings()) -> Finding:
-    """scan_query compares generic and custom plans inside a transaction it always rolls back; failures become an ERROR finding."""
+    """scan_query measures then verifies each cliff inside transactions it always rolls back; failures become an ERROR finding."""
     if conn.autocommit:
         raise ValueError("scan_query needs a connection with autocommit off, or measured writes would be committed")
     started = time.perf_counter()
     try:
         finding = _measure(conn, name, query, settings)
     except Exception as error:
-        finding = Finding(name=name, sql=query, verdict=Verdict.ERROR, error=str(error).splitlines()[0])
+        finding = Finding(name=name, sql=query, verdict=Verdict.ERROR, error=_first_line(error))
     finally:
-        conn.rollback()
-        conn.execute("deallocate all")
-        conn.rollback()
+        _reset(conn)
+    if finding.verdict is Verdict.CLIFF and settings.verify:
+        finding = _verify(conn, finding, settings)
     return replace(finding, seconds=time.perf_counter() - started)
