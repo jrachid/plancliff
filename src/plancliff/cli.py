@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from collections import Counter
+from importlib.metadata import version
 from pathlib import Path
 
 import psycopg
@@ -22,6 +23,7 @@ EXIT_PIPE_CLOSED = 141
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="plancliff", description="Find the queries that fall off a cliff when Postgres switches to a generic plan.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version('plancliff')}")
     commands = parser.add_subparsers(dest="command", required=True)
     scan = commands.add_parser("scan", help="measure generic against custom plans for each query of a file or of pg_stat_statements")
     scan.add_argument("dsn", help="connection string of a database copy with realistic data, e.g. postgresql://user@host/db")

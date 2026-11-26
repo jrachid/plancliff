@@ -1,18 +1,38 @@
 [project]
 name = "plancliff"
 version = "0.1.0"
-description = "Find the PostgreSQL queries that become hundreds of times slower once Postgres switches to a generic plan."
+description = "Find the PostgreSQL queries that become hundreds of times slower once Postgres switches a prepared statement to its generic plan, and prove the fix."
 readme = "README.md"
+keywords = ["postgresql", "postgres", "performance", "prepared-statements", "generic-plan", "query-plan", "psycopg", "pg_stat_statements"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
     { name = "Rachid Jeffali", email = "rachidj@protonmail.ch" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "pglast>=8.9",
     "psycopg[binary]>=3.3.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jrachid/plancliff"
+Issues = "https://github.com/jrachid/plancliff/issues"
+Changelog = "https://github.com/jrachid/plancliff/blob/main/CHANGELOG.md"
 
 [project.scripts]
 plancliff = "plancliff.cli:main"
@@ -24,4 +44,17 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
+    "ruff>=0.17.6",
 ]
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+extend-exclude = ["labo"]
+
+[tool.ruff.lint]
+# A query that fails, whatever the reason, must become an ERROR finding and never stop the scan of the others.
+ignore = ["BLE001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

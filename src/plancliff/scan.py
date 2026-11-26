@@ -7,12 +7,13 @@ import psycopg
 from psycopg import sql
 
 from plancliff.candidates import candidates
+from plancliff.fix import Fix, check_fixes
 from plancliff.parameters import parameter_columns
 from plancliff.settings import Settings
-from plancliff.fix import Fix, check_fixes
 from plancliff.verify import Verification, reset, verify
 
 DEFAULT_INTEGER = 100
+DEFAULT_SETTINGS = Settings()
 STATEMENT = "plancliff_probe"
 INTEGER_TYPES = {"smallint", "integer", "bigint"}
 
@@ -109,7 +110,7 @@ def _verify(conn: psycopg.Connection, finding: Finding, settings: Settings) -> F
     return replace(finding, verification=verification, verdict=Verdict.CLIFF, fixes=fixes)
 
 
-def scan_query(conn: psycopg.Connection, name: str, query: str, settings: Settings = Settings()) -> Finding:
+def scan_query(conn: psycopg.Connection, name: str, query: str, settings: Settings = DEFAULT_SETTINGS) -> Finding:
     """scan_query measures, verifies each cliff and proves its fixes, in transactions it always rolls back; failures become ERROR findings."""
     if conn.autocommit:
         raise ValueError("scan_query needs a connection with autocommit off, or measured writes would be committed")

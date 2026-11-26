@@ -8,7 +8,7 @@ from plancliff.fix import BROAD_FIX, Fix
 from plancliff.scan import Finding, Verdict
 from plancliff.settings import Settings
 from plancliff.style import BOLD, CYAN, DIM, GREEN, MAGENTA, RED, YELLOW, Style
-from plancliff.verify import BEFORE, AFTER
+from plancliff.verify import AFTER, BEFORE
 
 FORMAT_VERSION = 1
 SHOWN_VALUES = 6

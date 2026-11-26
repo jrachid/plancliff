@@ -1,0 +1,13 @@
+# Changelog
+
+## 0.1.0 — unreleased
+
+First release.
+
+- `plancliff scan` measures generic against custom plans for each query, with the most and the least common value of each parameter's column from `pg_stats`, inside transactions that are rolled back.
+- Each cliff is verified by 20 calls in `auto` mode, as a driver would make them: `cliff` when Postgres switches to the generic plan and slows down, `latent` when it keeps the custom plan.
+- Each confirmed cliff gets two targeted fixes, `SET LOCAL plan_cache_mode = force_custom_plan` and an unprepared query, each proven by 20 more calls.
+- Queries come from a file or from `pg_stat_statements`, of the scanned database or of another one through `--stats-from` and a read-only connection; constants hidden as `$n` are also tried as constants.
+- Refuses to scan a database other sessions are connected to, unless `--allow-busy`.
+- Text report, coloured in a terminal, or `--format json`; exit code 1 on a confirmed cliff.
+- Tested on PostgreSQL 14 to 18 and Python 3.11 to 3.13.
