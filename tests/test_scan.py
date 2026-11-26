@@ -51,9 +51,8 @@ def test_a_query_slower_than_the_timeout_is_an_error_not_a_hang(conn):
 
 
 def test_an_autocommit_connection_is_refused_so_writes_cannot_be_committed(dsn):
-    with psycopg.connect(dsn, autocommit=True) as autocommit:
-        with pytest.raises(ValueError):
-            scan_query(autocommit, "delete", "delete from jobs where id = $1")
+    with psycopg.connect(dsn, autocommit=True) as autocommit, pytest.raises(ValueError):
+        scan_query(autocommit, "delete", "delete from jobs where id = $1")
 
 
 def test_the_command_exits_with_1_when_a_cliff_is_found(dsn, tmp_path, capsys):
@@ -82,3 +81,15 @@ def _settings(**overrides):
     from plancliff.settings import Settings
 
     return Settings(**overrides)
+
+
+def test_piping_the_report_into_head_ends_quietly(dsn, tmp_path):
+    import subprocess
+    import sys
+
+    queries = tmp_path / "queries.sql"
+    queries.write_text("\n\n".join([QUEUE, BY_KEY] * 4) + "\n")
+    script = f"{sys.executable} -m plancliff.cli scan '{dsn}' {queries} -v | head -1"
+    result = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=120, check=False)
+    assert result.stdout.count("\n") == 1
+    assert "Traceback" not in result.stderr and "BrokenPipeError" not in result.stderr, result.stderr

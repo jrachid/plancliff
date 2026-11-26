@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 import time
 from collections import Counter
@@ -16,6 +17,7 @@ from plancliff.stats import StatsRead, StatsUnavailable, hidden_message, read_st
 from plancliff.style import BOLD, DIM, RED, YELLOW, Style, wants_color
 
 EXIT_OK, EXIT_CLIFF, EXIT_USAGE = 0, 1, 2
+EXIT_PIPE_CLOSED = 141
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -50,7 +52,7 @@ def _stat_queries(dsn: str, top: int) -> StatsRead:
         return read_stat_queries(conn, top)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None) -> int:
     args = _parser().parse_args(argv)
     s, err = Style(wants_color(args.color, sys.stdout)), Style(wants_color(args.color, sys.stderr))
     if args.file is not None and args.stats_from:
@@ -101,6 +103,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(text_summary(Counter(finding.verdict for finding in findings), seconds, s))
     return EXIT_CLIFF if any(finding.verdict is Verdict.CLIFF for finding in findings) else EXIT_OK
+
+
+def main(argv: list[str] | None = None) -> int:
+    """main returns 141, as a shell does on SIGPIPE, when the reader of the report goes away (`plancliff scan … | head`)."""
+    try:
+        return _main(argv)
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return EXIT_PIPE_CLOSED
 
 
 if __name__ == "__main__":
