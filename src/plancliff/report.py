@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Sequence
 from importlib.metadata import version
 
+from plancliff.fix import BROAD_FIX, Fix
 from plancliff.scan import Finding, Verdict
 from plancliff.settings import Settings
 from plancliff.style import BOLD, CYAN, DIM, GREEN, MAGENTA, RED, YELLOW, Style
@@ -37,6 +38,16 @@ def _verification_line(finding: Finding, s: Style) -> str | None:
     return f"{s('not confirmed:', BOLD, MAGENTA)} Postgres switched at prepared call {v.switched_at} but did not slow down enough; {timings}"
 
 
+def _fix_line(fix: Fix, s: Style) -> str:
+    if fix.error:
+        return f"{s('fix ?', BOLD, YELLOW)} {fix.hint}\n{INDENT}      {s('could not be checked:', YELLOW)} {fix.error}"
+    plans = f", {fix.generic_plans}/{fix.calls} generic" if fix.generic_plans is not None else ""
+    result = f"calls {AFTER.start + 1}-{fix.calls} {fix.after_ms:.2f} ms{plans}"
+    if fix.works:
+        return f"{s('fix ✓', BOLD, GREEN)} {fix.hint}\n{INDENT}      {s('proven:', GREEN)} {result}"
+    return f"{s('fix ✗', BOLD, RED)} {fix.hint}\n{INDENT}      {s('does not remove the cliff:', RED)} {result}"
+
+
 def text_line(finding: Finding, s: Style) -> str:
     label, badge_style = BADGES[finding.verdict]
     badge = s(label, badge_style)
@@ -53,6 +64,7 @@ def text_line(finding: Finding, s: Style) -> str:
         verification = _verification_line(finding, s)
         if verification:
             lines.append(f"{INDENT}{verification}")
+        lines.extend(f"{INDENT}{_fix_line(fix, s)}" for fix in finding.fixes)
     return "\n".join(lines)
 
 
@@ -62,7 +74,10 @@ def text_summary(counts: Counter, seconds: float, s: Style) -> str:
         return s(text, *styles) if counts[verdict] else s(text, DIM)
 
     parts = [part(Verdict.CLIFF, BOLD, RED), part(Verdict.LATENT, BOLD, MAGENTA), part(Verdict.OK, GREEN), part(Verdict.ERROR, YELLOW)]
-    return f"\n{sum(counts.values())} queries in {seconds:.1f} s: {', '.join(parts)}"
+    summary = f"\n{sum(counts.values())} queries in {seconds:.1f} s: {', '.join(parts)}"
+    if counts[Verdict.CLIFF]:
+        summary += f"\n{s('Prefer the targeted fixes above to the broad one:', DIM)} {s(BROAD_FIX, DIM)}"
+    return summary
 
 
 def _rounded(value):

@@ -9,7 +9,8 @@ from psycopg import sql
 from plancliff.candidates import candidates
 from plancliff.parameters import parameter_columns
 from plancliff.settings import Settings
-from plancliff.verify import Verification, verify
+from plancliff.fix import Fix, check_fixes
+from plancliff.verify import Verification, reset, verify
 
 DEFAULT_INTEGER = 100
 STATEMENT = "plancliff_probe"
@@ -36,6 +37,7 @@ class Finding:
     error: str = ""
     verification: Verification | None = None
     verification_error: str = ""
+    fixes: tuple[Fix, ...] = ()
     seconds: float = field(default=0.0, compare=False)
 
 
@@ -89,12 +91,6 @@ def _measure(conn: psycopg.Connection, name: str, query: str, settings: Settings
     return replace(worst, verdict=Verdict.CLIFF if settings.is_slowdown(worst.generic_ms, worst.custom_ms) else Verdict.OK)
 
 
-def _reset(conn: psycopg.Connection) -> None:
-    conn.rollback()
-    conn.execute("deallocate all")
-    conn.rollback()
-
-
 def _first_line(error: Exception) -> str:
     return (str(error).strip().splitlines() or [type(error).__name__])[0]
 
@@ -105,12 +101,15 @@ def _verify(conn: psycopg.Connection, finding: Finding, settings: Settings) -> F
     except Exception as error:
         return replace(finding, verification_error=_first_line(error))
     finally:
-        _reset(conn)
-    return replace(finding, verification=verification, verdict=Verdict.CLIFF if verification.confirmed else Verdict.LATENT)
+        reset(conn)
+    if not verification.confirmed:
+        return replace(finding, verification=verification, verdict=Verdict.LATENT)
+    fixes = check_fixes(conn, finding.sql, finding.values, verification, settings)
+    return replace(finding, verification=verification, verdict=Verdict.CLIFF, fixes=fixes)
 
 
 def scan_query(conn: psycopg.Connection, name: str, query: str, settings: Settings = Settings()) -> Finding:
-    """scan_query measures then verifies each cliff inside transactions it always rolls back; failures become an ERROR finding."""
+    """scan_query measures, verifies each cliff and proves its fixes, in transactions it always rolls back; failures become ERROR findings."""
     if conn.autocommit:
         raise ValueError("scan_query needs a connection with autocommit off, or measured writes would be committed")
     started = time.perf_counter()
@@ -119,7 +118,7 @@ def scan_query(conn: psycopg.Connection, name: str, query: str, settings: Settin
     except Exception as error:
         finding = Finding(name=name, sql=query, verdict=Verdict.ERROR, error=_first_line(error))
     finally:
-        _reset(conn)
+        reset(conn)
     if finding.verdict is Verdict.CLIFF and settings.verify:
         finding = _verify(conn, finding, settings)
     return replace(finding, seconds=time.perf_counter() - started)
