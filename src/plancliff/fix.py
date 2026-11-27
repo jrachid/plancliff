@@ -19,7 +19,7 @@ UNPREPARED_HINTS = {
     "asyncpg": "never prepare this query; asyncpg has no per-query switch: run it on a connection opened with statement_cache_size=0",
     "jdbc": "never prepare this query; with pgjdbc: ((PGStatement) statement).setPrepareThreshold(0) on this statement",
 }
-BROAD_FIX = "ALTER ROLE <app role> SET plan_cache_mode = force_custom_plan  -- every query of the role pays planning, about +75% on a 4-table join"
+BROAD_FIX = "ALTER ROLE <app role> SET plan_cache_mode = force_custom_plan  -- every query of the role is then planned on every call"
 
 
 def hint(method: Method, driver: str) -> str:

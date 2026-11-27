@@ -23,7 +23,7 @@ Two public examples, both reproduced on their real schema in [`labo/`](labo/READ
 - [OpenFGA #3444](https://github.com/openfga/openfga/issues/3444): the write pre-check, `SELECT … FOR UPDATE`, reported going from 13 ms to 43 s. Reproduced through psycopg 3 with default settings: 0.6 to 1 ms for calls 1 to 10, 242 ms at call 11.
 - [Temporal #12791](https://github.com/temporalio/temporal/issues/12791): the task cleanup `DELETE`. Reproduced the same way: 0.8 to 1.3 ms for calls 1 to 10, then 2.1 to 2.3 s per call.
 
-The usual cure, `plan_cache_mode = force_custom_plan` for the whole database, makes every query plan on every call: about +75% on a 4-table join in the lab. The point is to know *which* queries need it.
+The usual cure, `plan_cache_mode = force_custom_plan` for the whole database, makes every query plan on every call: in the lab, +3 µs per query on a lookup by key, +160 µs on a 4-table join (206 to 367 µs). The point is to know *which* queries need it.
 
 ## What plancliff does
 
