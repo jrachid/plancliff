@@ -49,12 +49,34 @@ def dsn() -> str:
             "insert into deliveries (event_id, target) select 1 + (g::bigint * 7919) %% %s, 'hook' from generate_series(1, %s) g",
             (EVENTS, 2 * EVENTS),
         )
+        _build_tuples(conn)
         conn.execute("create index on events (kind)")
         conn.execute("create index on deliveries (event_id)")
         conn.execute("analyze")
     yield test_dsn
     with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
         admin.execute(f"drop database if exists {TEST_DB} with (force)")
+
+
+USERSET_TUPLES = 25_000
+
+
+def _build_tuples(conn: psycopg.Connection) -> None:
+    """_build_tuples copies OpenFGA's tuple table, scaled down: 4 usersets of 25k tuples among 150k, over 40 types and 25 relations."""
+    conn.execute(
+        "create table tuple (store text not null, object_type text not null, object_id text not null, relation text not null,"
+        " _user text not null, user_type text not null, primary key (store, object_type, object_id, relation, _user))"
+    )
+    conn.execute("create index on tuple (store, object_type, object_id, relation, _user) where user_type = 'user'")
+    conn.execute("create index on tuple (store, object_type, object_id, relation, _user) where user_type = 'userset'")
+    conn.execute('create index on tuple (store, _user, relation, object_type, object_id collate "C")')
+    conn.execute(
+        "insert into tuple select 's1', case when g <= %(sets)s then 'document' else 'type' || (g %% 40) end, 'obj' || g,"
+        " case when g <= %(sets)s then 'viewer' else 'rel' || (g %% 25) end,"
+        " case when g <= %(sets)s then 'group:hot' || (g %% 4) || '#member' else 'user:u' || g end,"
+        " case when g <= %(sets)s then 'userset' else 'user' end from generate_series(1, %(all)s) g",
+        {"sets": 4 * USERSET_TUPLES, "all": 6 * USERSET_TUPLES},
+    )
 
 
 @pytest.fixture

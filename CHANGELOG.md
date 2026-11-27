@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A column bound to several parameters, such as the rows of an `IN` list of tuples, is also tried with its common values spread over those parameters, instead of the most common one everywhere. On OpenFGA's write pre-check, the cliff is now measured at 88 ms instead of 36 ms, close to what a write over several usersets costs.
+
 ## 0.1.1 — 2026-11-26
 
 - `--driver psycopg|pgx|asyncpg|jdbc` writes the unprepared fix in the application's driver: `pgx.QueryExecModeExec`, `setPrepareThreshold(0)`, `statement_cache_size=0`, or `prepare=False`. The JSON report records the driver.

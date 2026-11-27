@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from importlib.metadata import version
 
 from plancliff.fix import BROAD_FIX, Fix
-from plancliff.scan import Finding, Verdict
+from plancliff.scan import VARIED, Finding, Verdict
 from plancliff.settings import Settings
 from plancliff.style import BOLD, CYAN, DIM, GREEN, MAGENTA, RED, YELLOW, Style
 from plancliff.verify import AFTER, BEFORE
@@ -48,6 +48,12 @@ def _fix_line(fix: Fix, s: Style) -> str:
     return f"{s('fix ✗', BOLD, RED)} {fix.hint}\n{INDENT}      {s('does not remove the cliff:', RED)} {result}"
 
 
+def _scenario_label(scenario: str) -> str:
+    if scenario.startswith(VARIED):
+        return f"the frequent values, {scenario.removeprefix(VARIED)} varied across parameters"
+    return f"the {scenario} values"
+
+
 def text_line(finding: Finding, s: Style) -> str:
     label, badge_style = BADGES[finding.verdict]
     badge = s(label, badge_style)
@@ -60,7 +66,7 @@ def text_line(finding: Finding, s: Style) -> str:
     if flagged:
         values = finding.values
         shown = ", ".join(values[:SHOWN_VALUES]) + (f", … ({len(values)} values)" if len(values) > SHOWN_VALUES else "")
-        lines.append(f"{INDENT}{s(f'triggered by the {finding.scenario} values:', DIM)} {s(shown, CYAN)}")
+        lines.append(f"{INDENT}{s(f'triggered by {_scenario_label(finding.scenario)}:', DIM)} {s(shown, CYAN)}")
         if finding.note:
             lines.append(f"{INDENT}{s('note:', DIM)} {s(finding.note, DIM)}")
         verification = _verification_line(finding, s)

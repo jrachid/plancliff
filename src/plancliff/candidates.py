@@ -16,10 +16,11 @@ class EmptyTable(Exception):
 class Candidates:
     frequent: object
     rare: object
+    common: tuple = ()
 
 
 def candidates(conn: psycopg.Connection, column: Column) -> Candidates:
-    """candidates returns the most and least common values of a column from pg_stats, or one sampled value; raises EmptyTable."""
+    """candidates returns a column's common values from pg_stats, most common first, or one sampled value; raises EmptyTable."""
     row = conn.execute(
         "select most_common_vals::text::text[], most_common_freqs from pg_stats"
         " where tablename = %s and attname = %s and (%s::text is null or schemaname = %s)"
@@ -27,8 +28,8 @@ def candidates(conn: psycopg.Connection, column: Column) -> Candidates:
         (column.table, column.name, column.schema, column.schema),
     ).fetchone()
     if row and row[0]:
-        by_frequency = sorted(zip(row[1], row[0]))
-        return Candidates(frequent=by_frequency[-1][1], rare=by_frequency[0][1])
+        common = tuple(value for _, value in sorted(zip(row[1], row[0]), key=lambda pair: -pair[0]))
+        return Candidates(frequent=common[0], rare=common[-1], common=common)
     table = _relation(column)
     pick = sql.SQL("select {}::text from {} {} limit 1")
     sample = conn.execute(pick.format(sql.Identifier(column.name), table, sql.SQL("tablesample system (1)"))).fetchone()

@@ -8,13 +8,14 @@ from psycopg import sql
 
 from plancliff.candidates import INTEGER_TYPES, candidates, fresh_value, unique_columns
 from plancliff.fix import Fix, check_fixes
-from plancliff.parameters import is_insert, parameter_columns
+from plancliff.parameters import Column, is_insert, parameter_columns
 from plancliff.settings import Settings
 from plancliff.verify import SAVEPOINT, Verification, reset, verify
 
 DEFAULT_INTEGER = 100
 DEFAULT_SETTINGS = Settings()
 STATEMENT = "plancliff_probe"
+VARIED = "varied "
 
 
 class Verdict(StrEnum):
@@ -80,7 +81,23 @@ def _values_per_scenario(conn: psycopg.Connection, query: str) -> dict[str, list
             rare.append(DEFAULT_INTEGER)
         else:
             raise MissingValue(f"${number} ({type_name}) matches no column: a value must be supplied")
-    return {"frequent": frequent, "rare": rare}
+    scenarios = {"frequent": frequent, "rare": rare}
+    for column, numbers in _repeated_columns(columns, keys).items():
+        common = tried[numbers[0]].common
+        if len(common) >= 2:
+            varied = list(frequent)
+            for position, number in enumerate(numbers):
+                varied[number - 1] = common[position % len(common)]
+            scenarios[f"{VARIED}{column.name}"] = varied
+    return scenarios
+
+
+def _repeated_columns(columns: dict[int, Column], keys: dict[int, Column]) -> dict[Column, list[int]]:
+    numbers_by_column: dict[Column, list[int]] = {}
+    for number in sorted(columns):
+        if number not in keys:
+            numbers_by_column.setdefault(columns[number], []).append(number)
+    return {column: numbers for column, numbers in numbers_by_column.items() if len(numbers) >= 2}
 
 
 def _measure(conn: psycopg.Connection, name: str, query: str, settings: Settings) -> Finding:

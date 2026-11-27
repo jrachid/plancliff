@@ -5,13 +5,13 @@ Find the PostgreSQL queries that become hundreds of times slower once Postgres s
 ```
 $ plancliff scan postgresql://localhost/openfga_copy --stats-from postgresql://localhost/openfga_prod
 1 queries from pg_stat_statements of openfga_prod, costliest first
- CLIFF      945.8×  generic     48.24 ms, custom     0.05 ms  SELECT store, object_type, object_id, relation, _user, user_…  [12 calls, queryid -1250848085573255456]
-         triggered by the frequent values: store1, document, obj1188, viewer, group:hot1#member, userset, … (31 values)
-         confirmed: Postgres switched to the generic plan at prepared call 6 (15/20 generic); calls 2-5 0.47 ms, calls 7-20 40.78 ms
+ CLIFF     1121.7×  generic     85.25 ms, custom     0.08 ms  SELECT store, object_type, object_id, relation, _user, user_…  [12 calls, queryid -1250848085573255456]
+         triggered by the frequent values, _user varied across parameters: store1, document, obj826, viewer, group:hot1#member, userset, … (31 values)
+         confirmed: Postgres switched to the generic plan at prepared call 6 (15/20 generic); calls 2-5 0.42 ms, calls 7-20 83.17 ms
          fix ✓ SET LOCAL plan_cache_mode = force_custom_plan;  -- in the same transaction, just before this query
-               proven: calls 7-20 0.53 ms, 0/20 generic
+               proven: calls 7-20 0.40 ms, 0/20 generic
          fix ✓ never prepare this query; with psycopg 3: cursor.execute(query, params, prepare=False)
-               proven: calls 7-20 0.62 ms
+               proven: calls 7-20 0.31 ms
 ```
 
 ## The problem
@@ -123,7 +123,7 @@ Without the `pg_read_all_stats` role, the statements of other roles are stored a
 
 ## Limits
 
-- **Two scenarios per column**, its most and its least common value, taken independently: a trap that needs a specific combination of values can be missed.
+- **Few scenarios per column**: its most and its least common value, taken independently, and, for a column bound to several parameters (the rows of an `IN` list), its common values spread over those parameters, one column at a time. A trap that needs a specific combination of values across columns can be missed.
 - **Realistic data only.** On synthetic data with 101 task queues instead of 2,000, Temporal's ticket query does not fall: plancliff reports the data it is given.
 - **Untestable queries** come out as `error`: empty tables, text or binary parameters that match no column, queries completed at runtime. On Temporal's 94 queries, 7 are untestable. An `INSERT` gets a value absent from each unique column, so it does not hit an existing key.
 - **The verification replays one value 20 times.** An application varies its values, which can make Postgres switch earlier, later, or never.
