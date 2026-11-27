@@ -104,12 +104,14 @@ def _measure(conn: psycopg.Connection, name: str, query: str, settings: Settings
     conn.execute("select set_config('statement_timeout', %s, true)", (f"{int(settings.timeout_s * 1000)}ms",))
     conn.execute("deallocate all")
     conn.execute(sql.SQL("prepare {} as {}").format(sql.Identifier(STATEMENT), sql.SQL(query)))
-    worst = Finding(name=name, sql=query, verdict=Verdict.OK)
+    worst, worst_rank = Finding(name=name, sql=query, verdict=Verdict.OK), None
     for scenario, values in _values_per_scenario(conn, query).items():
         generic = _execution_ms(conn, "force_generic_plan", values, settings.runs)
         custom = _execution_ms(conn, "force_custom_plan", values, settings.runs)
         ratio = generic / max(custom, 0.001)
-        if ratio > worst.ratio:
+        rank = (settings.is_slowdown(generic, custom), generic - custom)
+        if worst_rank is None or rank > worst_rank:
+            worst_rank = rank
             worst = Finding(
                 name=name, sql=query, verdict=Verdict.OK, ratio=ratio, scenario=scenario,
                 generic_ms=generic, custom_ms=custom, values=tuple(str(v) for v in values),

@@ -3,6 +3,7 @@
 ## 0.1.2 — 2026-11-27
 
 - A column bound to several parameters, such as the rows of an `IN` list of tuples, is also tried with its common values spread over those parameters, instead of the most common one everywhere. On OpenFGA's write pre-check, the cliff is now measured at 88 ms instead of 36 ms, close to what a write over several usersets costs.
+- Fixed: when several scenarios fall off a cliff, the one reported is the one that loses the most milliseconds per call, not the one with the highest ratio, which a custom plan of a few microseconds made random.
 - The broad fix in the report no longer quotes a lab figure that depends on the query; the README gives the lab's cost per query instead.
 
 ## 0.1.1 — 2026-11-26
